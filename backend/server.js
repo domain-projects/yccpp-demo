@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const multer = require('multer');
 const Anthropic = require('@anthropic-ai/sdk');
 
 const {
@@ -9,6 +10,19 @@ const {
   getAssetDetail,
   getTrend,
 } = require('./scadaData');
+
+const {
+  buildSampleCSV,
+  parseUploadedFile,
+  summarizeDataset,
+  buildMockModelPlan,
+  buildTrainingCharts,
+} = require('./modelStudio');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+});
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -267,6 +281,194 @@ app.post('/api/actions', (req, res) => {
 
 app.get('/api/actions', (_req, res) => {
   res.json({ actions: actionLog.slice(0, 50) });
+});
+
+// ---------- Model Studio ----------
+app.get('/api/model/sample-dataset', (_req, res) => {
+  const csv = buildSampleCSV();
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader(
+    'Content-Disposition',
+    'attachment; filename="yccpp_gt01_sample_30d.csv"'
+  );
+  res.send(csv);
+});
+
+async function runModelPlan(parsed, { isSample = false } = {}) {
+  const summary = summarizeDataset(parsed);
+  if (!summary) return { error: 'Dataset is empty or unreadable' };
+
+  summary.isSample = isSample;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  // Compact context for Claude — first 5 rows + numeric summary
+  const sampleRows = parsed.rows.slice(0, 5);
+  const tagsLine = summary.numericSummary
+    .map(
+      (n) =>
+        `  - ${n.column}: range [${n.min}, ${n.max}], mean ${n.mean}, start→end ${n.startValue}→${n.endValue} (${n.trendPct > 0 ? '+' : ''}${n.trendPct}%)`
+    )
+    .join('\n');
+
+  const prompt = `You are a senior ML engineer at KPCL's Yelahanka Combined Cycle Power Plant. The plant operations team has uploaded a sensor-data export to assess what AI/ML predictive-maintenance pipeline can be built from it. Respond with STRICT JSON only — no prose, no markdown fences.
+
+Dataset:
+- File: ${summary.filename}
+- Sheet: ${summary.sheetName || 'csv'}
+- Rows: ${summary.rowCount}
+- Columns (${summary.columnCount}): ${summary.columns.join(', ')}
+- Timestamp column: ${summary.timestampColumn || 'not detected'}
+${summary.timeRange ? `- Time range: ${summary.timeRange.start} → ${summary.timeRange.end} (${summary.timeRange.spanHours} h)` : ''}
+
+Numeric tag summary (per column):
+${tagsLine}
+
+First 5 rows (JSON):
+${JSON.stringify(sampleRows, null, 2)}
+
+Recommend a 3-model pipeline using KPCL's existing production registry: gt-pinn-v3.1.2 (PINN, 4-layer MLP, 256 units, Brayton-cycle physics loss, MLflow run e4f8a2b1, ±0.3% η_c MAE) + lstm-comp-v2.4.0 (2-layer LSTM, 128 units, seq 60d, MC-dropout 100 passes, MLflow run f9a3c2d7, 88.2% within ±4 days) + fft-ae-v1.6.0 (Conv autoencoder, 1D FFT input, reconstruction-error threshold 0.70, MLflow run b1d7e4f2, ROC AUC 0.941). Serving stack: FastAPI · Docker · K8s. Monitoring: Evidently AI. Registry: MLflow. Pipeline: Airflow monthly DAG. Training data: 2 years of GT-01 ops at 1-min resolution across 112 tags, 70/15/15 chronological split. Respond with ONLY this JSON schema:
+{
+  "datasetAssessment": {
+    "verdict": "string",
+    "strengths": ["string", ...],
+    "gaps": ["string", ...]
+  },
+  "trainingData": {
+    "span": "string",
+    "asset": "string",
+    "tagCount": number,
+    "samplingRate": "string",
+    "trainValTest": "string",
+    "windowStart": "string",
+    "trainEnd": "string",
+    "valEnd": "string",
+    "testEnd": "string"
+  },
+  "recommendedPipeline": {
+    "models": [
+      {
+        "name": "string (e.g. gt-pinn-v3.1.2)",
+        "type": "string",
+        "architecture": "string",
+        "physics": "string (PINN only, else omit)",
+        "uncertainty": "string (LSTM only, else omit)",
+        "threshold": "string (FFT-AE only, else omit)",
+        "target": "string",
+        "inputs": ["string", ...],
+        "testMetric": "string",
+        "mlflowRun": "string",
+        "rationale": "string"
+      }
+    ],
+    "trainValTest": "string",
+    "retrainCadence": "string",
+    "servingStack": "string",
+    "monitoring": "string"
+  },
+  "infrastructure": {
+    "serving": { "tool": "FastAPI", "detail": "Docker · K8s" },
+    "monitoring": { "tool": "Evidently AI", "detail": "Drift alerts" },
+    "registry": { "tool": "MLflow", "detail": "v3.1.2 active" },
+    "pipeline": { "tool": "Airflow", "detail": "Monthly DAG" }
+  },
+  "featureImportance": [
+    { "feature": "string", "importance": number (0-1) }
+  ],
+  "expectedPerformance": {
+    "pinnMaeEtaC": "string",
+    "lstmDaysToWashAccuracy": "string",
+    "fftAeRocAuc": "string",
+    "earlyWarning": "string"
+  },
+  "nextSteps": [
+    { "step": "string", "priority": "P1" | "P2" | "P3" }
+  ],
+  "summary": "string — 2-3 sentence executive summary"
+}`;
+
+  const charts = buildTrainingCharts();
+
+  // Mock fallback
+  if (!apiKey || apiKey === 'sk-ant-your-key-here') {
+    return {
+      ...buildMockModelPlan(summary),
+      charts,
+      datasetSummary: summary,
+      source: 'mock',
+      model: null,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model: 'claude-opus-4-7',
+      max_tokens: 2500,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const text = response.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n')
+      .trim();
+    let parsedResp;
+    try {
+      const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+      parsedResp = JSON.parse(cleaned);
+    } catch (e) {
+      console.error('Failed to parse Claude JSON for model plan, falling back. Raw:', text);
+      parsedResp = buildMockModelPlan(summary);
+    }
+    return {
+      ...parsedResp,
+      charts,
+      datasetSummary: summary,
+      source: 'claude',
+      model: response.model,
+      generatedAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    console.error('Claude API error (model gen):', err.message);
+    return {
+      ...buildMockModelPlan(summary),
+      charts,
+      datasetSummary: summary,
+      source: 'mock-fallback',
+      error: err.message,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+}
+
+app.post('/api/model/generate', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded (field name: file)' });
+  }
+  let parsed;
+  try {
+    parsed = parseUploadedFile(req.file.buffer, req.file.originalname);
+  } catch (e) {
+    return res.status(400).json({ error: `Failed to parse file: ${e.message}` });
+  }
+  const result = await runModelPlan(parsed);
+  if (result.error) return res.status(400).json(result);
+  res.json(result);
+});
+
+// Demo endpoint — generates a model plan over the built-in synthetic GT-01 dataset.
+// Used to populate the Model Studio with sample output by default.
+app.get('/api/model/demo', async (_req, res) => {
+  const csv = buildSampleCSV();
+  const buffer = Buffer.from(csv, 'utf-8');
+  let parsed;
+  try {
+    parsed = parseUploadedFile(buffer, 'yccpp_gt01_sample_30d.csv');
+  } catch (e) {
+    return res.status(500).json({ error: `Sample parse failed: ${e.message}` });
+  }
+  const result = await runModelPlan(parsed, { isSample: true });
+  res.json(result);
 });
 
 // ---------- Start ----------
