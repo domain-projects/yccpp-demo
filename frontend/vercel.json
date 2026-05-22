@@ -4,8 +4,5 @@
   "outputDirectory": "build",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "env": {
-    "REACT_APP_API_BASE": "@react_app_api_base"
-  }
+  ]
 }

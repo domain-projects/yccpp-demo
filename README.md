@@ -46,6 +46,8 @@ CRA proxies `/api/*` to `http://localhost:3001` (see `frontend/package.json`).
 | POST   | `/api/analyze/:id`                | Claude RCA — returns structured JSON |
 | POST   | `/api/actions`                    | Log approve / reject + work order    |
 | GET    | `/api/actions`                    | Recent action log                    |
+| GET    | `/api/model/sample-dataset`       | Download a synthetic GT-01 CSV       |
+| POST   | `/api/model/generate`             | Upload XLSX/XLS/CSV → Claude returns ML pipeline plan |
 
 ## Demo Flow
 
@@ -58,6 +60,14 @@ CRA proxies `/api/*` to `http://localhost:3001` (see `frontend/package.json`).
    - Evidence list
    - Prioritized immediate actions
 5. Click **Approve & Create Work Order** — work-order number, crew, and ETA are confirmed.
+
+### AI Model Studio
+
+Switch to the **AI Model Studio** tab in the header to demo the model-generation flow:
+
+1. Click **↓ Download sample dataset** to grab a synthetic 30-day GT-01 CSV (compressor fouling + late-onset bearing wear baked in).
+2. Drop the same file back into the upload zone (or any XLSX/XLS/CSV from a customer).
+3. Click **Generate AI Model** — Claude profiles the schema and returns: dataset assessment, recommended 3-model pipeline (PINN + LSTM + FFT-AE), expected performance, feature importance, and next steps. Falls back to a curated mock if no API key is set.
 
 ## Deployment
 

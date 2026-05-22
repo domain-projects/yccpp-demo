@@ -6,6 +6,7 @@ import AssetHeader from './components/AssetHeader';
 import TrendChart from './components/TrendChart';
 import WarningBanner from './components/WarningBanner';
 import AIAnalysisCard from './components/AIAnalysisCard';
+import ModelStudio from './components/ModelStudio';
 
 const PRIMARY_TAG_BY_ASSET = {
   'GT-1': 'vibration',
@@ -15,6 +16,7 @@ const PRIMARY_TAG_BY_ASSET = {
 };
 
 export default function App() {
+  const [view, setView] = useState('monitoring'); // 'monitoring' | 'studio'
   const [assets, setAssets] = useState([]);
   const [plant, setPlant] = useState(null);
   const [generatedAt, setGeneratedAt] = useState(null);
@@ -128,6 +130,19 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-plant-bg text-plant-text">
       <Header generatedAt={generatedAt} />
+      <nav className="border-b border-plant-border bg-plant-panel px-6 flex gap-1">
+        <TabButton active={view === 'monitoring'} onClick={() => setView('monitoring')}>
+          Asset Monitoring
+        </TabButton>
+        <TabButton active={view === 'studio'} onClick={() => setView('studio')}>
+          AI Model Studio
+        </TabButton>
+      </nav>
+      {view === 'studio' ? (
+        <div className="flex-1 overflow-y-auto">
+          <ModelStudio />
+        </div>
+      ) : (
       <div className="flex flex-1 overflow-hidden">
         <AssetSidebar
           assets={assets}
@@ -212,6 +227,7 @@ export default function App() {
           )}
         </main>
       </div>
+      )}
 
       <footer className="border-t border-plant-border bg-plant-panel px-6 py-2 text-[11px] text-plant-muted flex items-center justify-between">
         <span>
@@ -227,5 +243,20 @@ export default function App() {
         </span>
       </footer>
     </div>
+  );
+}
+
+function TabButton({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+        active
+          ? 'border-plant-accent text-plant-accent'
+          : 'border-transparent text-plant-muted hover:text-plant-text'
+      }`}
+    >
+      {children}
+    </button>
   );
 }

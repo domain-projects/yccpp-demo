@@ -20,4 +20,19 @@ export const api = {
     jsonFetch(`/api/analyze/${id}`, { method: 'POST', body: JSON.stringify({}) }),
   postAction: (payload) =>
     jsonFetch('/api/actions', { method: 'POST', body: JSON.stringify(payload) }),
+  sampleDatasetUrl: () => `${BASE}/api/model/sample-dataset`,
+  demoModel: () => jsonFetch('/api/model/demo'),
+  generateModel: async (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${BASE}/api/model/generate`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`${res.status} ${res.statusText} ${text}`);
+    }
+    return res.json();
+  },
 };
