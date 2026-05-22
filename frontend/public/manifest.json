@@ -1,0 +1,8 @@
+{
+  "short_name": "YCCPP AI",
+  "name": "YCCPP AI Platform",
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#0a0e14",
+  "background_color": "#0a0e14"
+}
